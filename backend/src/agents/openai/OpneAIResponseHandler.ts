@@ -29,7 +29,93 @@ export class OpenAIResponseHandler {
     this.chatClient.on("ai_indicator.stop", this.handleStopGenerating);
   }
 
-  run = async () => {};
+  run = async () => {
+    const { cid, id: message_id } = this.message;
+    let isCompleted = false;
+    let toolOutputs = [];
+    let currentStream: AssistantStream = this.assistantStream;
+
+    try {
+      while (!isCompleted) {
+        for await (const event of currentStream) {
+          this.handleStreamEvent(event);
+
+          if (
+            event.event === "thread.run.requires_action" &&
+            event.data.required_action?.type === "submit_tool_outputs"
+          ) {
+            this.run_id = event.data.id;
+            await this.channel.sendEvent({
+              type: "ai_indicator.update",
+              ai_state: "AI_STATE_EXTERNAL_SOURCES",
+              cid: cid,
+              message_id: message_id,
+            });
+            const toolCalls =
+              event.data.required_action.submit_tool_outputs.tool_calls;
+            toolOutputs = [];
+
+            for (const toolCall of toolCalls) {
+              if (toolCall.function.name === "web_search") {
+                try {
+                  const args = JSON.parse(toolCall.function.arguments);
+                  const searchResult = await this.performWebSearch(args.query);
+                  toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: searchResult,
+                  });
+                } catch (e) {
+                  console.error(
+                    "Error Parsing Tool Arguments OR Performing Web Search",
+                    e
+                  );
+                  toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify({ error: "Failed To Call Tool" }),
+                  });
+                }
+              }
+            }
+            // Exit the inner loop to submit tool outputs
+            break;
+          }
+
+          if (event.event === "thread.run.completed") {
+            isCompleted = true;
+            break; // Exit the inner loop
+          }
+
+          if (event.event === "thread.run.failed") {
+            isCompleted = true;
+            await this.handleError(
+              new Error(event.data.last_error?.message ?? "Run Failed")
+            );
+            break; // Exit the inner loop
+          }
+        }
+
+        if (isCompleted) {
+          break; // Exit the while loop
+        }
+
+        if (toolOutputs.length > 0) {
+          currentStream = this.openai.beta.threads.runs.submitToolOutputsStream(
+            this.run_id,
+            {
+              thread_id: this.openAiThread.id,
+              tool_outputs: toolOutputs,
+            }
+          );
+          toolOutputs = []; // Reset tool outputs
+        }
+      }
+    } catch (error) {
+      console.error("An Error Occurred During The Run:", error);
+      await this.handleError(error as Error);
+    } finally {
+      await this.dispose();
+    }
+  };
 
   dispose = async () => {
     if (this.is_done) {
