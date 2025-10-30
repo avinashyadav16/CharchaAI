@@ -153,8 +153,4 @@ npm run dev
 - Backend enforces Node `>=20` via `engines` and uses TypeScript build (`tsc`).
 - OpenAI model: configured in `OpenAIAgent.ts` (e.g., `gpt-4o`) with Assistants + `web_search` function.
 
-<<<<<<< HEAD
-![Diagrammatic Overview](./frontend/assests/Diagramatic_Overview.svg)
-=======
 ![Diagrammatic-Overview](./frontend/assets/Diagramatic_Overview.PNG)
->>>>>>> d2c7cc2 (updates)
